@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+    <title>Pivotal CloudCache Chat</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=yes">
+    
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/demo.css">
+
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/superagent/3.5.2/superagent.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/sockjs/1/sockjs.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+</head>
+
+<body>
+	<div id="demo">
+		<div id="navbar">
+			<div id="title">PCC WAN Replication Demo</div>
+		</div>
+
+		<div id="cache_stats" class="stats_box">Cache
+			<div id="cache_num" class="stats_num">0</div>
+			<button id="clearcache" class="btn btn-danger" onclick="clearcache()">Clear</button>
+		</div>
+
+		<div id="load_param">
+			&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Region: 
+			<select id="region_dropdown">
+				<option value="us-west">us-west</option>
+				<option value="us-central">us-central</option>
+				<option value="us-east">us-east</option>
+			</select>
+			
+			&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Starting Index:
+			<div id="index">
+				<input id="starting_index" type='text' size="5" value="0"/>
+			</div>
+			
+			&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Rate:
+			<div id="load">
+				<input id="load_num" type='text' value="20" />
+				<button id="load_button" class="btn btn-success" onclick="load()">start</button>
+				<div id="loading_status"></div>
+			</div>
+		</div>
+	</div>
+	
+	<div>
+		<div id="subscribe_log"><b>PCC Client Subscription Log:<br><br></b></div>
+	</div>
+	
+	
+	<script>
+		function update_stats() {
+			superagent.get('/countcache')
+			.then(function(res) {
+				$("#cache_num").html(res.text);
+		  	})
+		  	.catch(function (error) {
+		    	console.log(error);
+			});
+			superagent.get('/loadstatus')
+			.then(function(res) {
+				if (res.text == "running") {
+					$("#load_button").removeClass("btn btn-success").addClass("btn btn-danger");
+					$("#load_button").html("stop");
+					$("#load_button").attr("onclick", "stop()");
+				} else {
+					$("#load_button").removeClass("btn btn-danger").addClass("btn btn-success");
+					$("#load_button").html("start");
+					$("#load_button").attr("onclick", "load()");
+				}
+		  	})
+		  	.catch(function (error) {
+		    	console.log(error);
+			});
+		}
+	
+		update_stats();
+		console.log($("#region_dropdown :selected").text())
+		
+		function clearcache() {
+			superagent.get('/clearcache')
+			.then(function(res) {
+				update_stats();
+		  	})
+		  	.catch(function (error) {
+		    	console.log(error);
+			});	
+		}
+		
+		function load(n) {
+			
+			if (!isNaN($("#load_num").val()) || !isNaN($("#starting_index").val()) ) {
+				var load_num = $("#load_num").val();
+				var starting_index = $("#starting_index").val();
+				var region = $("#region_dropdown :selected").text();
+				
+				$("#loading_status").show().html("Loading...");
+				
+				var xmlHttp = new XMLHttpRequest();
+	 			xmlHttp.open( "GET", "/startload?region="+region+"&starting_index="+starting_index+"&amount="+load_num, false );
+	 			xmlHttp.send( null );
+				
+	 			update_stats();	
+			} else {
+				$("#load_num").val('');
+				$("#loading_status").html("Invalid number... Please retry.").fadeOut(3000);
+			}
+		}
+		
+		function stop() {
+			superagent.get('/stopload')
+			.then(function(res) {
+				update_stats();
+				$("#loading_status").html("Stopped.").fadeOut(3000);
+		  	})
+		  	.catch(function (error) {
+		    	console.log(error);
+			});	
+		}
+		
+		
+		var socket = new SockJS('/demo-websocket');
+		client = Stomp.over(socket);
+		
+		client.connect({}, function (frame) {
+			subscribeEvents(client);
+		}, () => {
+			reconnect("/demo-websocket", subscribeEvents);
+		});
+		
+		function reconnect(socketUrl, successCallback) {
+			let connected = false;
+			let reconInv = setInterval(() => {
+				var socket = new SockJS(socketUrl);
+				client = Stomp.over(socket);
+			    client.connect({}, (frame) => {
+			    	clearInterval(reconInv);
+			      	connected = true;
+			      	successCallback(client);
+			    }, () => {
+			      	if (connected) {
+			        	reconnect(socketUrl, successCallback);
+			      	}
+			    });
+			}, 1000);
+		}
+		
+		function subscribeEvents(client) {
+			client.subscribe('/topic/subscribe_log', function(msg) {
+				$("#subscribe_log").append(msg.body+"<br>");
+	        }.bind(this));
+			
+			client.subscribe('/topic/update', function(msg) {
+				update_stats();	
+	        }.bind(this));
+		}
+	</script>
+</body>
+
+</html>
